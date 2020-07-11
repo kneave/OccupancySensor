@@ -4,16 +4,20 @@
 #include <NewPing.h>
 #include <FastLED.h>
 
-
 //  Pin Definitions
 #define LEDPIN 7
-#define PIR0 20          // A2
-#define PIR1 21          // A3
-#define FOOTSWITCH 7
+#define PIR0 20 // A2
+#define PIR1 21 // A3
+#define FOOTSWITCH 8
 #define SONAR1 2
 #define SONAR2 3
 #define SONAR3 4
 #define SONAR4 5
+#define CE 18
+#define CSN 19
+
+// 0 = controller, 1 = peripheral
+bool radioNumber = 0;
 
 #define NUM_LEDS 10
 CRGBArray<NUM_LEDS> leds;
@@ -21,7 +25,6 @@ CRGBArray<NUM_LEDS> leds;
 //  Sensor Setup
 #define SONAR_NUM 4      // Number of sensors.
 #define MAX_DISTANCE 200 // Maximum distance (in cm) to ping.
-
 
 NewPing sonar[SONAR_NUM] = { // Sensor object array.
     NewPing(10, SONAR1, MAX_DISTANCE),
@@ -50,17 +53,15 @@ typedef enum
 {
   role_controller = 0,
   role_peripheral
-} role_e;         
-                                                          // The various roles supported by this sketch
+} role_e;
+// The various roles supported by this sketch
 const char *role_friendly_name[] = {"invalid", "controller", "peripheral"}; // The debug-friendly names of those roles
 
-// 0 = controller, 1 = peripheral
-bool radioNumber = 1;
-RF24 radio(19, 18);
+RF24 radio(CE, CSN);
 
 byte addresses[][6] = {"1Node", "2Node"}; // Radio pipe addresses for the 2 nodes to communicate.
 
-role_e role = role_e(radioNumber);                                          // The role of the current running sketch
+role_e role = role_e(radioNumber); // The role of the current running sketch
 
 byte counter = 1;
 
@@ -107,6 +108,8 @@ long lastTriggered[] = {0, 0, 0, 0, 0, 0, 0};
 
 void PrintRoomStates()
 {
+  Serial.print(millis());
+  Serial.print(" - Room States: ");
   Serial.print(roomStateData.room1);
   Serial.print(",");
   Serial.print(roomStateData.room2);
@@ -118,11 +121,11 @@ void PrintRoomStates()
 
 void CheckRoomStates()
 {
-  if ((sensorStates[sensor_e(room1_1)] == state_e(1)) | (sensorStates[sensor_e(room1_2)] == state_e(1)) | (sensorStates[sensor_e(pir0)] == state_e(1)))
+  if ((sensorStates[sensor_e(room1_1)] == state_e(1)) | (sensorStates[sensor_e(room1_2)] == state_e(1)))
   {
     roomStateData.room1 = state_e(1);
   }
-  else if ((sensorStates[sensor_e(room1_1)] == state_e(2)) | (sensorStates[sensor_e(room1_2)] == state_e(2)) | (sensorStates[sensor_e(pir0)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room1_1)] == state_e(2)) | (sensorStates[sensor_e(room1_2)] == state_e(2)))
   {
     roomStateData.room1 = state_e(2);
   }
@@ -131,11 +134,11 @@ void CheckRoomStates()
     roomStateData.room1 = state_e(3);
   }
 
-  if ((sensorStates[sensor_e(room2_1)] == state_e(1)) | (sensorStates[sensor_e(room2_2)] == state_e(1)) | (sensorStates[sensor_e(pir1)] == state_e(1)))
+  if ((sensorStates[sensor_e(room2_1)] == state_e(1)) | (sensorStates[sensor_e(room2_2)] == state_e(1)))
   {
     roomStateData.room2 = state_e(1);
   }
-  else if ((sensorStates[sensor_e(room2_1)] == state_e(2)) | (sensorStates[sensor_e(room2_2)] == state_e(2)) | (sensorStates[sensor_e(pir1)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room2_1)] == state_e(2)) | (sensorStates[sensor_e(room2_2)] == state_e(2)))
   {
     roomStateData.room2 = state_e(2);
   }
@@ -150,6 +153,9 @@ void CheckSensorStates()
 {
   for (uint8_t i = 0; i < SONAR_NUM; i++)
   {
+    Serial.print(lastTriggered[i]);
+    Serial.print(',');
+
     long timeSinceTriggered = millis() - lastTriggered[i];
 
     if (timeSinceTriggered < amberTrigger)
@@ -168,11 +174,11 @@ void CheckSensorStates()
       sensorStates[i] = state_e(3);
     }
   }
+  Serial.println();
 }
 
-void ReadSensors()
+void ReadSensors(bool debug)
 {
-  bool debug = false;
   if (debug == true)
   {
     for (uint8_t i = 0; i < SONAR_NUM; i++)
@@ -226,7 +232,7 @@ void UpdateRadio()
         while (radio.available())
         {                          // If an ack with payload was received
           radio.read(&gotByte, 1); // Read it, and display the response time
-          counter++; // Increment the counter variable
+          counter++;               // Increment the counter variable
         }
       }
     }
@@ -257,7 +263,7 @@ void UpdateRadio()
 
 void InitLights()
 {
-  FastLED.addLeds<WS2812B, LEDPIN, RGB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812, LEDPIN, RGB>(leds, NUM_LEDS);
 }
 
 void SetRoomLEDs(state_e state, int start)
@@ -300,18 +306,8 @@ void UpdateLEDS()
   FastLED.show();
 }
 
-void setup()
+void InitRadio()
 {
-  Serial.begin(115200);
-
-  //  LED init
-  InitLights();
-  
-  //  Sensor init
-  pinMode(PIR0, INPUT);
-  pinMode(PIR1, INPUT);
-  pinMode(FOOTSWITCH, INPUT);
-
   //  radio init
   radio.begin();
 
@@ -332,6 +328,23 @@ void setup()
 
   radio.writeAckPayload(1, &counter, 1); // Pre-load an ack-paylod into the FIFO buffer for pipe 1
   //radio.printDetails();
+}
+
+void setup()
+{
+  Serial.begin(115200);
+
+  //  LED init
+  InitLights();
+
+  //  Init the footswitch
+  pinMode(FOOTSWITCH, INPUT);
+
+  //  Sensor init
+  pinMode(PIR0, INPUT);
+  pinMode(PIR1, INPUT);
+
+  InitRadio();
 
   //  Assume all rooms busy until proven otherwise
   roomStateData.alley_front = state_e(1);
@@ -345,11 +358,15 @@ void loop()
   //  If 1, access requested
   footswitchvalue = digitalRead(FOOTSWITCH);
 
-  ReadSensors();
-  CheckSensorStates();
-  CheckRoomStates();
+  if (radioNumber == 0)
+  {
+    ReadSensors(false);
+    //  ReadSensors(true);
+    CheckSensorStates();
+    UpdateLEDS();
+    CheckRoomStates();
+  }
   PrintRoomStates();
-  
-  UpdateLEDS();
+
   UpdateRadio();
 }
