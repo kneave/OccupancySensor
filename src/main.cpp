@@ -1,23 +1,28 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include "nRF24L01.h"
 #include "RF24.h"
 #include <NewPing.h>
 #include <FastLED.h>
 
 //  Pin Definitions
-#define LEDPIN 7
-#define PIR0 20 // A2
-#define PIR1 21 // A3
-#define FOOTSWITCH 8
 #define SONAR1 2
 #define SONAR2 3
 #define SONAR3 4
 #define SONAR4 5
-#define CE 18
-#define CSN 19
+#define LEDPIN 7
+#define FOOTSWITCH 8
+#define MODESWITCH 9
+#define CE 19
+#define CSN 18
+#define PIR0 20 // A2
+#define PIR1 21 // A3
 
 // 0 = controller, 1 = peripheral
 bool radioNumber = 0;
+
+//  Last time in millis since last used the radio
+long radioLastSeen = 1;
 
 #define NUM_LEDS 10
 CRGBArray<NUM_LEDS> leds;
@@ -43,7 +48,8 @@ int greenTrigger = 30000;
 
 int pir0value = LOW;
 int pir1value = LOW;
-int footswitchvalue = LOW;
+int controllerFootSwitch = LOW;
+int peripheralFootSwitch = LOW;
 
 //  Radio Setup
 
@@ -59,7 +65,7 @@ const char *role_friendly_name[] = {"invalid", "controller", "peripheral"}; // T
 
 RF24 radio(CE, CSN);
 
-byte addresses[][6] = {"1Node", "2Node"}; // Radio pipe addresses for the 2 nodes to communicate.
+byte addresses[][6] = {"1Node", "2Node"};
 
 role_e role = role_e(radioNumber); // The role of the current running sketch
 
@@ -109,7 +115,9 @@ long lastTriggered[] = {0, 0, 0, 0, 0, 0, 0};
 void PrintRoomStates()
 {
   Serial.print(millis());
-  Serial.print(" - Room States: ");
+  Serial.print("-");
+  Serial.print(radioNumber);
+  Serial.print("- Room States: ");
   Serial.print(roomStateData.room1);
   Serial.print(",");
   Serial.print(roomStateData.room2);
@@ -153,9 +161,6 @@ void CheckSensorStates()
 {
   for (uint8_t i = 0; i < SONAR_NUM; i++)
   {
-    Serial.print(lastTriggered[i]);
-    Serial.print(',');
-
     long timeSinceTriggered = millis() - lastTriggered[i];
 
     if (timeSinceTriggered < amberTrigger)
@@ -174,7 +179,6 @@ void CheckSensorStates()
       sensorStates[i] = state_e(3);
     }
   }
-  Serial.println();
 }
 
 void ReadSensors(bool debug)
@@ -209,7 +213,7 @@ void ReadSensors(bool debug)
       }
     }
 
-    footswitchvalue = analogRead(FOOTSWITCH);
+    controllerFootSwitch = analogRead(FOOTSWITCH);
   }
 }
 
@@ -217,46 +221,58 @@ void UpdateRadio()
 {
   if (radioNumber == 0)
   {
-    byte gotByte; // Initialize a variable for the incoming response
-
     radio.stopListening(); // First, stop listening so we can talk.
 
-    if (radio.write(&roomStateData, sizeof(roomStateData)))
-    { // Send the counter variable to the other radio
-      if (!radio.available())
-      {
-        //  Set status LED to red
+    if (!radio.write(&roomStateData, sizeof(roomStateData)))
+    {
+      radioLastSeen = 0;
+    }
+
+    radio.startListening(); // Now, continue listening
+
+    unsigned long started_waiting_at = micros(); // Set up a timeout period, get the current microseconds
+    boolean timeout = false;                     // Set up a variable to indicate if a response was received or not
+
+    while (!radio.available())
+    { // While nothing is received
+      if (micros() - started_waiting_at > 200000)
+      { // If waited longer than 200ms, indicate timeout and exit while loop
+        timeout = true;
+        break;
       }
-      else
-      {
-        while (radio.available())
-        {                          // If an ack with payload was received
-          radio.read(&gotByte, 1); // Read it, and display the response time
-          counter++;               // Increment the counter variable
-        }
-      }
+    }
+
+    if (timeout)
+    { // Describe the results
+      Serial.println(F("Failed, response timed out."));
     }
     else
     {
-      Serial.print(millis());
-      Serial.println(F(": sending failed.")); // If no ack response, sending failed
-      delay(1000);
+      // Grab the response, compare, and send to debugging spew
+      radio.read(&peripheralFootSwitch, sizeof(peripheralFootSwitch));
+      Serial.print("Remote footswitch: ");
+      Serial.println(peripheralFootSwitch);
+      radioLastSeen = millis();
     }
+
+    // Try again 1s later
+    delay(50);
   }
-  else
+
+  //  I could use an "else", this makes it easier to read the code
+  if (radioNumber == 1)
   {
-    //  Radio Number 2
-    byte pipeNo, gotByte; // Declare variables for the pipe and the byte received
-    while (radio.available(&pipeNo))
-    { // Read all available payloads
-      radio.read(&roomStateData, sizeof(roomStateData));
-      // Since this is a call-response. Respond directly with an ack payload.
-      gotByte += 1; // Ack payloads are much more efficient than switching to transmit mode to respond to a call
-      // radio.writeAckPayload(pipeNo, &gotByte, 1); // This can be commented out to send empty payloads.
-      Serial.print(F("Loaded response "));
-      Serial.print(roomStateData.room1);
-      Serial.print(",");
-      Serial.println(roomStateData.room2);
+    if (radio.available())
+    {
+      // Variable for the received timestamp
+      while (radio.available())
+      {                                                    // While there is data ready
+        radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
+      }
+      radio.stopListening();                                  // First, stop listening so we can talk
+      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
+      radio.startListening();                                 // Now, resume listening so we catch the next packets.
+      radioLastSeen = millis();
     }
   }
 }
@@ -290,9 +306,20 @@ void SetRoomLEDs(state_e state, int start)
 
 void UpdateLEDS()
 {
-  //  Status
-  //  TODO:  Set logic so show RAG based on time since last radio packet
-  leds[0] = CRGB::Red;
+  //  Radio status LED
+  long radioLastSeenDiff = millis() - radioLastSeen;
+  if (radioLastSeenDiff < 5000)
+  {
+    leds[0] = CRGB::Green;
+  }
+  else if (radioLastSeenDiff < 10000)
+  {
+    leds[0] = CRGB::Yellow;
+  }
+  else
+  {
+    leds[0] = CRGB::Red;
+  }
 
   //  Alley
   SetRoomLEDs(roomStateData.alley_front, 1);
@@ -310,29 +337,31 @@ void InitRadio()
 {
   //  radio init
   radio.begin();
+  radio.setPALevel(RF24_PA_MIN);
+  radio.setDataRate(RF24_1MBPS);
 
-  radio.enableAckPayload();      // Allow optional ack payloads
-  radio.enableDynamicPayloads(); // Ack payloads are dynamic payloads
-
-  if (radioNumber == 1)
+  if (radioNumber)
   {
-    radio.openWritingPipe(addresses[1]);    // Both radios listen on the same pipes by default, but opposite addresses
-    radio.openReadingPipe(1, addresses[0]); // Open a reading pipe on address 0, pipe 1
+    radio.openWritingPipe(addresses[1]);
+    radio.openReadingPipe(1, addresses[0]);
   }
   else
   {
     radio.openWritingPipe(addresses[0]);
     radio.openReadingPipe(1, addresses[1]);
   }
-  radio.startListening(); // Start listening
 
-  radio.writeAckPayload(1, &counter, 1); // Pre-load an ack-paylod into the FIFO buffer for pipe 1
-  //radio.printDetails();
+  radio.startListening(); // Start listening
+  radio.printDetails();   // Dump the configuration of the rf unit for debugging
 }
 
 void setup()
 {
   Serial.begin(115200);
+
+  //  If a jumper is connected between MODESWITCH and ground, radioNumber = 0
+  pinMode(MODESWITCH, INPUT_PULLUP);
+  radioNumber = digitalRead(MODESWITCH);
 
   //  LED init
   InitLights();
@@ -355,18 +384,19 @@ void setup()
 
 void loop()
 {
-  //  If 1, access requested
-  footswitchvalue = digitalRead(FOOTSWITCH);
-
   if (radioNumber == 0)
   {
     ReadSensors(false);
     //  ReadSensors(true);
     CheckSensorStates();
-    UpdateLEDS();
     CheckRoomStates();
+    PrintRoomStates();
   }
-  PrintRoomStates();
+  else
+  {
+    peripheralFootSwitch = digitalRead(FOOTSWITCH);
+  }  
 
+  UpdateLEDS();
   UpdateRadio();
 }
