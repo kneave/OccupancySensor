@@ -15,11 +15,11 @@
 #define MODESWITCH 9
 #define CE 19
 #define CSN 18
-#define PIR0 20 // A2
-#define PIR1 21 // A3
+#define PIR0 20
+#define PIR1 21
 
 // 0 = controller, 1 = peripheral
-bool radioNumber = 0;
+bool radioNumber = 1;
 
 //  Last time in millis since last used the radio
 long radioLastSeen = 1;
@@ -43,8 +43,8 @@ int sonarTriggerDistance[] = {10, 10, 10, 10};
 //  Time in milliseconds from last activation
 //  If time is greater than the value, that state is active
 //  red is < amber
-int amberTrigger = 15000;
-int greenTrigger = 30000;
+int amberTrigger = 7500;
+int greenTrigger = 15000;
 
 int pir0value = LOW;
 int pir1value = LOW;
@@ -129,11 +129,11 @@ void PrintRoomStates()
 
 void CheckRoomStates()
 {
-  if ((sensorStates[sensor_e(room1_1)] == state_e(1)) | (sensorStates[sensor_e(room1_2)] == state_e(1)))
+  if ((sensorStates[sensor_e(room1_1)] == state_e(1)) | (sensorStates[sensor_e(room1_2)] == state_e(1)) | (sensorStates[sensor_e(pir0)] == state_e(1)))
   {
     roomStateData.room1 = state_e(1);
   }
-  else if ((sensorStates[sensor_e(room1_1)] == state_e(2)) | (sensorStates[sensor_e(room1_2)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room1_1)] == state_e(2)) | (sensorStates[sensor_e(room1_2)] == state_e(2)) | (sensorStates[sensor_e(pir0)] == state_e(2)))
   {
     roomStateData.room1 = state_e(2);
   }
@@ -142,11 +142,11 @@ void CheckRoomStates()
     roomStateData.room1 = state_e(3);
   }
 
-  if ((sensorStates[sensor_e(room2_1)] == state_e(1)) | (sensorStates[sensor_e(room2_2)] == state_e(1)))
+  if ((sensorStates[sensor_e(room2_1)] == state_e(1)) | (sensorStates[sensor_e(room2_2)] == state_e(1)) | (sensorStates[sensor_e(pir1)] == state_e(1)))
   {
     roomStateData.room2 = state_e(1);
   }
-  else if ((sensorStates[sensor_e(room2_1)] == state_e(2)) | (sensorStates[sensor_e(room2_2)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room2_1)] == state_e(2)) | (sensorStates[sensor_e(room2_2)] == state_e(2)) | (sensorStates[sensor_e(pir0)] == state_e(2)))
   {
     roomStateData.room2 = state_e(2);
   }
@@ -157,11 +157,15 @@ void CheckRoomStates()
 }
 
 //  Check the sensor states, generate room states
-void CheckSensorStates()
+void CheckSensorStates(bool debug = false)
 {
-  for (uint8_t i = 0; i < SONAR_NUM; i++)
+  String debugmsg = "Sensors: ";
+
+  long time = millis();
+  for (uint8_t i = 0; i < 6; i++)
   {
-    long timeSinceTriggered = millis() - lastTriggered[i];
+    long timeSinceTriggered = time - lastTriggered[i];
+    debugmsg += String(timeSinceTriggered) + ",";
 
     if (timeSinceTriggered < amberTrigger)
     {
@@ -179,9 +183,14 @@ void CheckSensorStates()
       sensorStates[i] = state_e(3);
     }
   }
+
+  if(debug == true)
+  {
+    Serial.println(debugmsg);
+  }
 }
 
-void ReadSensors(bool debug)
+void ReadSensors(bool debug = false)
 {
   if (debug == true)
   {
@@ -194,10 +203,10 @@ void ReadSensors(bool debug)
       Serial.print("cm ");
     }
     Serial.print("PIR0 ");
-    Serial.print(digitalRead(PIR0));
+    Serial.print(digitalRead(PIR0) == HIGH);
 
     Serial.print(" PIR1 ");
-    Serial.print(digitalRead(PIR1));
+    Serial.print(digitalRead(PIR1) == HIGH);
 
     Serial.println();
   }
@@ -212,8 +221,18 @@ void ReadSensors(bool debug)
         lastTriggered[i] = millis();
       }
     }
+    
+    if(digitalRead(PIR0) == HIGH)
+    {
+      lastTriggered[sensor_e(pir0)] = millis();
+    }
 
-    controllerFootSwitch = analogRead(FOOTSWITCH);
+    if(digitalRead(PIR1) == HIGH)
+    {
+      lastTriggered[sensor_e(pir1)] = millis();
+    }
+
+    controllerFootSwitch = (digitalRead(FOOTSWITCH) == HIGH);
   }
 }
 
@@ -359,11 +378,6 @@ void setup()
 {
   Serial.begin(115200);
 
-  //  If a jumper is connected between MODESWITCH and ground, radioNumber = 0
-  //  A jumper needs to be connected to either ground or VCC, if floating it is unpredictable
-  pinMode(MODESWITCH, INPUT);
-  radioNumber = digitalRead(MODESWITCH) == HIGH;
-
   //  LED init
   InitLights();
 
@@ -387,9 +401,8 @@ void loop()
 {
   if (radioNumber == 0)
   {
-    ReadSensors(false);
-    //  ReadSensors(true);
-    CheckSensorStates();
+    ReadSensors();
+    CheckSensorStates(true);
     CheckRoomStates();
     PrintRoomStates();
   }
