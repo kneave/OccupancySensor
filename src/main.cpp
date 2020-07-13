@@ -19,7 +19,7 @@
 #define PIR1 21
 
 // 0 = controller, 1 = peripheral
-bool radioNumber = 1;
+bool radioNumber = 0;
 
 //  Last time in millis since last used the radio
 long radioLastSeen = 1;
@@ -184,7 +184,7 @@ void CheckSensorStates(bool debug = false)
     }
   }
 
-  if(debug == true)
+  if (debug == true)
   {
     Serial.println(debugmsg);
   }
@@ -221,13 +221,13 @@ void ReadSensors(bool debug = false)
         lastTriggered[i] = millis();
       }
     }
-    
-    if(digitalRead(PIR0) == HIGH)
+
+    if (digitalRead(PIR0) == HIGH)
     {
       lastTriggered[sensor_e(pir0)] = millis();
     }
 
-    if(digitalRead(PIR1) == HIGH)
+    if (digitalRead(PIR1) == HIGH)
     {
       lastTriggered[sensor_e(pir1)] = millis();
     }
@@ -288,9 +288,9 @@ void UpdateRadio()
       {                                                    // While there is data ready
         radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
       }
-      radio.stopListening();                                  // First, stop listening so we can talk
+      radio.stopListening();                                            // First, stop listening so we can talk
       radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
-      radio.startListening();                                 // Now, resume listening so we catch the next packets.
+      radio.startListening();                                           // Now, resume listening so we catch the next packets.
       radioLastSeen = millis();
     }
   }
@@ -299,6 +299,13 @@ void UpdateRadio()
 void InitLights()
 {
   FastLED.addLeds<WS2812, LEDPIN, RGB>(leds, NUM_LEDS);
+
+  leds[0] = CRGB::Red;
+  for (int i = 1; i < NUM_LEDS; i++)
+  {
+    leds[i] = CRGB::Black;
+  }
+  FastLED.show();
 }
 
 void SetRoomLEDs(state_e state, int start)
@@ -409,7 +416,7 @@ void loop()
   else
   {
     peripheralFootSwitch = digitalRead(FOOTSWITCH);
-  }  
+  }
 
   UpdateLEDS();
   UpdateRadio();
