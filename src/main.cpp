@@ -360,8 +360,9 @@ void setup()
   Serial.begin(115200);
 
   //  If a jumper is connected between MODESWITCH and ground, radioNumber = 0
-  pinMode(MODESWITCH, INPUT_PULLUP);
-  radioNumber = digitalRead(MODESWITCH);
+  //  A jumper needs to be connected to either ground or VCC, if floating it is unpredictable
+  pinMode(MODESWITCH, INPUT);
+  radioNumber = digitalRead(MODESWITCH) == HIGH;
 
   //  LED init
   InitLights();
