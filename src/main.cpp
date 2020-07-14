@@ -105,12 +105,11 @@ typedef enum
   room2_1,
   room2_2,
   pir0,
-  pir1,
-  footswitch
+  pir1
 } sensor_e;
 
 //  sensor_e references the locations below
-long lastTriggered[] = {0, 0, 0, 0, 0, 0, 0};
+long lastTriggered[] = {0, 0, 0, 0, 0, 0};
 
 void PrintRoomStates()
 {
@@ -231,8 +230,6 @@ void ReadSensors(bool debug = false)
     {
       lastTriggered[sensor_e(pir1)] = millis();
     }
-
-    controllerFootSwitch = (digitalRead(FOOTSWITCH) == HIGH);
   }
 }
 
@@ -389,7 +386,7 @@ void setup()
   InitLights();
 
   //  Init the footswitch
-  pinMode(FOOTSWITCH, INPUT);
+  pinMode(FOOTSWITCH, INPUT_PULLUP);
 
   //  Sensor init
   pinMode(PIR0, INPUT);
@@ -412,11 +409,14 @@ void loop()
     CheckSensorStates(true);
     CheckRoomStates();
     PrintRoomStates();
+    controllerFootSwitch = digitalRead(FOOTSWITCH) == LOW;
   }
   else
   {
-    peripheralFootSwitch = digitalRead(FOOTSWITCH);
+    peripheralFootSwitch = digitalRead(FOOTSWITCH) == LOW;
   }
+
+  //  Implement footswitch logic here
 
   UpdateLEDS();
   UpdateRadio();
