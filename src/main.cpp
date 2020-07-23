@@ -12,7 +12,6 @@
 #define SONAR4 5
 #define LEDPIN 7
 #define FOOTSWITCH 8
-#define MODESWITCH 9
 #define CE 19
 #define CSN 18
 #define PIR0 20
@@ -47,7 +46,12 @@ int amberRoomDelay = 7500;
 int greenRoomTrigger = 15000;
 
 int amberAlleyDelay = 10000;
-int greenAlleyDelay = 14000;
+int redAlleyDelay = 14000;
+
+//  Interval is how quickly to flash while waiting on the alley
+int flashInterval = 500;
+//  Flash last is the time since we last toggled the LED
+int flashLast = 0;
 
 int pir0value = LOW;
 int pir1value = LOW;
@@ -75,10 +79,11 @@ role_e role = role_e(radioNumber); // The role of the current running sketch
 byte counter = 1;
 
 //  Setup variables for sharing room states
-//  1 = engaged, 2 = possibly vacant, 3 = vacant
+//  0 = LED off, 1 = engaged, 2 = possibly vacant, 3 = vacant, 4 = waiting (alleyway)
 typedef enum
 {
-  red = 1,
+  off,
+  red,
   amber,
   green,
   waiting
@@ -162,6 +167,42 @@ void CheckRoomStates()
   }
 }
 
+state_e CheckAlley(state_e here, state_e there, sensor_e sensor)
+{
+  //  If waiting and the other side is green, flash red
+  switch (here)
+  {
+  case state_e(off):
+  case state_e(waiting):
+    if (there == state_e(red))
+    {
+      here = state_e(green);
+      lastTriggered[sensor] = millis();
+    }
+
+    if (millis() - flashLast > flashInterval)
+    {
+      flashLast = millis();
+      here = here == state_e(waiting) ? state_e(off) : state_e(waiting);
+    }
+    break;
+  case state_e(green):
+    if (millis() - lastTriggered[sensor] > amberAlleyDelay)
+    {
+      here = state_e(amber);
+    }
+    break;
+  case state_e(amber):
+    if (millis() - lastTriggered[sensor] > redAlleyDelay)
+    {
+      here = state_e(red);
+    }
+    break;
+  }
+
+  return here;
+}
+
 //  Check the sensor states, generate room states
 void CheckSensorStates(bool debug = false)
 {
@@ -189,6 +230,9 @@ void CheckSensorStates(bool debug = false)
       sensorStates[i] = state_e(green);
     }
   }
+
+  roomStateData.alley_front = CheckAlley(roomStateData.alley_front, roomStateData.alley_rear, contFootswitch);
+  // roomStateData.alley_rear = CheckAlley(roomStateData.alley_rear, roomStateData.alley_front, periFootswitch);
 
   if (debug == true)
   {
@@ -304,7 +348,7 @@ void InitLights()
 {
   FastLED.addLeds<WS2812, LEDPIN, RGB>(leds, NUM_LEDS);
 
-  leds[0] = CRGB::Red;
+  leds[0] = CRGB::Blue;
   for (int i = 1; i < NUM_LEDS; i++)
   {
     leds[i] = CRGB::Black;
@@ -327,9 +371,15 @@ void SetRoomLEDs(state_e state, int start)
     leds[start + 2] = CRGB::Black;
     break;
   case state_e(red):
+  case state_e(waiting):
     leds[start] = CRGB::Black;
     leds[start + 1] = CRGB::Black;
     leds[start + 2] = CRGB::Red;
+    break;
+  case state_e(off):
+    leds[start] = CRGB::Black;
+    leds[start + 1] = CRGB::Black;
+    leds[start + 2] = CRGB::Black;
     break;
   }
 }
@@ -390,22 +440,29 @@ void setup()
   Serial.begin(115200);
 
   //  LED init
+  Serial.println("Init lights...");
   InitLights();
 
   //  Init the footswitch
+  Serial.println("Set footswitch pullup...");
   pinMode(FOOTSWITCH, INPUT_PULLUP);
 
   //  Sensor init
+
+  Serial.println("Set PIR inputs...");
   pinMode(PIR0, INPUT);
   pinMode(PIR1, INPUT);
 
+  Serial.println("Init Radio...");
   InitRadio();
 
   //  Assume all rooms busy until proven otherwise
-  roomStateData.alley_front = state_e(1);
-  roomStateData.alley_rear = state_e(1);
-  roomStateData.room1 = state_e(1);
-  roomStateData.room2 = state_e(1);
+  roomStateData.alley_front = state_e(red);
+  roomStateData.alley_rear = state_e(red);
+  roomStateData.room1 = state_e(red);
+  roomStateData.room2 = state_e(red);
+
+  Serial.println("Setup complete.");
 }
 
 void loop()
@@ -425,16 +482,22 @@ void loop()
 
   //  Implement footswitch logic here
   //  If button pressed on either side, state_e(4)
-  
-  if(controllerFootSwitch == LOW)
+
+  if ((roomStateData.alley_front != state_e(waiting)) & (roomStateData.alley_front != state_e(off)))
   {
-    roomStateData.alley_front = state_e(waiting);
+    if (controllerFootSwitch == HIGH)
+    {
+      roomStateData.alley_front = state_e(waiting);
+    }
   }
 
-  if(peripheralFootSwitch == LOW)
-  {
-    roomStateData.alley_rear = state_e(waiting);
-  }
+  // if (peripheralFootSwitch == LOW)
+  // {
+  //   if ((roomStateData.alley_rear != state_e(waiting)) | (roomStateData.alley_rear != state_e(off)))
+  //   {
+  //     roomStateData.alley_rear = state_e(waiting);
+  //   }
+  // }
 
   UpdateLEDS();
   UpdateRadio();
