@@ -43,8 +43,11 @@ int sonarTriggerDistance[] = {10, 10, 10, 10};
 //  Time in milliseconds from last activation
 //  If time is greater than the value, that state is active
 //  red is < amber
-int amberTrigger = 7500;
-int greenTrigger = 15000;
+int amberRoomDelay = 7500;
+int greenRoomTrigger = 15000;
+
+int amberAlleyDelay = 10000;
+int greenAlleyDelay = 14000;
 
 int pir0value = LOW;
 int pir1value = LOW;
@@ -77,7 +80,8 @@ typedef enum
 {
   red = 1,
   amber,
-  green
+  green,
+  waiting
 } state_e;
 
 struct RoomStates
@@ -88,8 +92,9 @@ struct RoomStates
   state_e alley_rear;
 } roomStateData;
 
-//  sonar 0 to 3, pir0, pir1, footswitch
+//  sonar 0 to 3, pir0, pir1, controller footswitch, peripheral footswitch
 state_e sensorStates[] = {
+    state_e(1),
     state_e(1),
     state_e(1),
     state_e(1),
@@ -105,11 +110,13 @@ typedef enum
   room2_1,
   room2_2,
   pir0,
-  pir1
+  pir1,
+  contFootswitch,
+  periFootswitch
 } sensor_e;
 
 //  sensor_e references the locations below
-long lastTriggered[] = {0, 0, 0, 0, 0, 0};
+long lastTriggered[] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void PrintRoomStates()
 {
@@ -128,30 +135,30 @@ void PrintRoomStates()
 
 void CheckRoomStates()
 {
-  if ((sensorStates[sensor_e(room1_1)] == state_e(1)) | (sensorStates[sensor_e(room1_2)] == state_e(1)) | (sensorStates[sensor_e(pir0)] == state_e(1)))
+  if ((sensorStates[sensor_e(room1_1)] == state_e(red)) | (sensorStates[sensor_e(room1_2)] == state_e(red)) | (sensorStates[sensor_e(pir0)] == state_e(red)))
   {
-    roomStateData.room1 = state_e(1);
+    roomStateData.room1 = state_e(red);
   }
-  else if ((sensorStates[sensor_e(room1_1)] == state_e(2)) | (sensorStates[sensor_e(room1_2)] == state_e(2)) | (sensorStates[sensor_e(pir0)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room1_1)] == state_e(amber)) | (sensorStates[sensor_e(room1_2)] == state_e(amber)) | (sensorStates[sensor_e(pir0)] == state_e(amber)))
   {
-    roomStateData.room1 = state_e(2);
+    roomStateData.room1 = state_e(amber);
   }
   else
   {
-    roomStateData.room1 = state_e(3);
+    roomStateData.room1 = state_e(green);
   }
 
-  if ((sensorStates[sensor_e(room2_1)] == state_e(1)) | (sensorStates[sensor_e(room2_2)] == state_e(1)) | (sensorStates[sensor_e(pir1)] == state_e(1)))
+  if ((sensorStates[sensor_e(room2_1)] == state_e(red)) | (sensorStates[sensor_e(room2_2)] == state_e(red)) | (sensorStates[sensor_e(pir1)] == state_e(red)))
   {
-    roomStateData.room2 = state_e(1);
+    roomStateData.room2 = state_e(red);
   }
-  else if ((sensorStates[sensor_e(room2_1)] == state_e(2)) | (sensorStates[sensor_e(room2_2)] == state_e(2)) | (sensorStates[sensor_e(pir0)] == state_e(2)))
+  else if ((sensorStates[sensor_e(room2_1)] == state_e(amber)) | (sensorStates[sensor_e(room2_2)] == state_e(amber)) | (sensorStates[sensor_e(pir0)] == state_e(amber)))
   {
-    roomStateData.room2 = state_e(2);
+    roomStateData.room2 = state_e(amber);
   }
   else
   {
-    roomStateData.room2 = state_e(3);
+    roomStateData.room2 = state_e(green);
   }
 }
 
@@ -166,20 +173,20 @@ void CheckSensorStates(bool debug = false)
     long timeSinceTriggered = time - lastTriggered[i];
     debugmsg += String(timeSinceTriggered) + ",";
 
-    if (timeSinceTriggered < amberTrigger)
+    if (timeSinceTriggered < amberRoomDelay)
     {
       //  Set state to red
-      sensorStates[i] = state_e(1);
+      sensorStates[i] = state_e(red);
     }
-    else if (timeSinceTriggered < greenTrigger)
+    else if (timeSinceTriggered < greenRoomTrigger)
     {
       //  Set state to amber
-      sensorStates[i] = state_e(2);
+      sensorStates[i] = state_e(amber);
     }
     else
     {
       //  Set state to green
-      sensorStates[i] = state_e(3);
+      sensorStates[i] = state_e(green);
     }
   }
 
@@ -417,6 +424,17 @@ void loop()
   }
 
   //  Implement footswitch logic here
+  //  If button pressed on either side, state_e(4)
+  
+  if(controllerFootSwitch == LOW)
+  {
+    roomStateData.alley_front = state_e(waiting);
+  }
+
+  if(peripheralFootSwitch == LOW)
+  {
+    roomStateData.alley_rear = state_e(waiting);
+  }
 
   UpdateLEDS();
   UpdateRadio();
