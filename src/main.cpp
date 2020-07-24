@@ -179,8 +179,7 @@ state_e CheckAlley(state_e here, state_e there, sensor_e sensor)
       here = state_e(green);
       lastTriggered[sensor] = millis();
     }
-
-    if (millis() - flashLast > flashInterval)
+    else if (millis() - flashLast > flashInterval)
     {
       flashLast = millis();
       here = here == state_e(waiting) ? state_e(off) : state_e(waiting);
@@ -232,7 +231,7 @@ void CheckSensorStates(bool debug = false)
   }
 
   roomStateData.alley_front = CheckAlley(roomStateData.alley_front, roomStateData.alley_rear, contFootswitch);
-  // roomStateData.alley_rear = CheckAlley(roomStateData.alley_rear, roomStateData.alley_front, periFootswitch);
+  roomStateData.alley_rear = CheckAlley(roomStateData.alley_rear, roomStateData.alley_front, periFootswitch);
 
   if (debug == true)
   {
@@ -402,7 +401,14 @@ void UpdateLEDS()
   }
 
   //  Alley
-  SetRoomLEDs(roomStateData.alley_front, 1);
+  if (radioNumber == 0)
+  {
+    SetRoomLEDs(roomStateData.alley_front, 1);
+  }
+  else
+  {
+    SetRoomLEDs(roomStateData.alley_rear, 1);
+  }
 
   //  Room 1
   SetRoomLEDs(roomStateData.room1, 4);
@@ -474,30 +480,30 @@ void loop()
     CheckRoomStates();
     PrintRoomStates();
     controllerFootSwitch = digitalRead(FOOTSWITCH) == LOW;
+
+    //  Implement footswitch logic here
+    //  If button pressed on either side, state_e(4)
+
+    if ((roomStateData.alley_front != state_e(waiting)) & (roomStateData.alley_front != state_e(off)))
+    {
+      if (controllerFootSwitch == HIGH)
+      {
+        roomStateData.alley_front = state_e(waiting);
+      }
+    }
+
+    if ((roomStateData.alley_rear != state_e(waiting)) & (roomStateData.alley_rear != state_e(off)))
+    {
+      if (peripheralFootSwitch == HIGH)
+      {
+        roomStateData.alley_rear = state_e(waiting);
+      }
+    }
   }
   else
   {
     peripheralFootSwitch = digitalRead(FOOTSWITCH) == LOW;
   }
-
-  //  Implement footswitch logic here
-  //  If button pressed on either side, state_e(4)
-
-  if ((roomStateData.alley_front != state_e(waiting)) & (roomStateData.alley_front != state_e(off)))
-  {
-    if (controllerFootSwitch == HIGH)
-    {
-      roomStateData.alley_front = state_e(waiting);
-    }
-  }
-
-  // if (peripheralFootSwitch == LOW)
-  // {
-  //   if ((roomStateData.alley_rear != state_e(waiting)) | (roomStateData.alley_rear != state_e(off)))
-  //   {
-  //     roomStateData.alley_rear = state_e(waiting);
-  //   }
-  // }
 
   UpdateLEDS();
   UpdateRadio();
