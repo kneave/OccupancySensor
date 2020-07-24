@@ -18,7 +18,7 @@
 #define PIR1 21
 
 // 0 = controller, 1 = peripheral
-bool radioNumber = 0;
+bool radioNumber = 1;
 
 //  Last time in millis since last used the radio
 long radioLastSeen = 1;
@@ -484,7 +484,7 @@ void loop()
     //  Implement footswitch logic here
     //  If button pressed on either side, state_e(4)
 
-    if ((roomStateData.alley_front != state_e(waiting)) & (roomStateData.alley_front != state_e(off)))
+    if (roomStateData.alley_front == state_e(red))
     {
       if (controllerFootSwitch == HIGH)
       {
@@ -492,7 +492,7 @@ void loop()
       }
     }
 
-    if ((roomStateData.alley_rear != state_e(waiting)) & (roomStateData.alley_rear != state_e(off)))
+    if (roomStateData.alley_rear == state_e(red))
     {
       if (peripheralFootSwitch == HIGH)
       {
