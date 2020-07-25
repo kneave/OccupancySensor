@@ -12,7 +12,8 @@
 #define SONAR4 5
 #define LEDPIN 7
 #define FOOTSWITCH 8
-#define TRIGGER 10
+#define R1_TRIGGER 9
+#define R2_TRIGGER 10
 #define CE 19
 #define CSN 18
 #define PIR0 20
@@ -32,10 +33,10 @@ CRGBArray<NUM_LEDS> leds;
 #define MAX_DISTANCE 200 // Maximum distance (in cm) to ping.
 
 NewPing sonar[SONAR_NUM] = { // Sensor object array.
-    NewPing(TRIGGER, SONAR1, MAX_DISTANCE),
-    NewPing(TRIGGER, SONAR2, MAX_DISTANCE),
-    NewPing(TRIGGER, SONAR3, MAX_DISTANCE),
-    NewPing(TRIGGER, SONAR4, MAX_DISTANCE)};
+    NewPing(R1_TRIGGER, SONAR1, MAX_DISTANCE),
+    NewPing(R1_TRIGGER, SONAR2, MAX_DISTANCE),
+    NewPing(R2_TRIGGER, SONAR3, MAX_DISTANCE),
+    NewPing(R2_TRIGGER, SONAR4, MAX_DISTANCE)};
 
 //  Distance below which sonar considered triggered
 int sonarTriggerDistance[] = {10, 10, 10, 10};
