@@ -17,7 +17,7 @@
 #define PIR0 20
 #define PIR1 21
 
-// 0 = controller, 1 = peripheral
+// 0 = controller, 1 = peripheral, 2/3 = sensor nodes
 bool radioNumber = 1;
 
 //  Last time in millis since last used the radio
@@ -68,11 +68,11 @@ typedef enum
   role_peripheral
 } role_e;
 // The various roles supported by this sketch
-const char *role_friendly_name[] = {"invalid", "controller", "peripheral"}; // The debug-friendly names of those roles
+const char *role_friendly_name[] = {"invalid", "controller", "peripheral", "sensor1", "sensor2"}; // The debug-friendly names of those roles
 
 RF24 radio(CE, CSN);
 
-byte addresses[][6] = {"1Node", "2Node"};
+byte addresses[][6] = {"1Node", "2Node", "3Node", "4Node"};
 
 role_e role = role_e(radioNumber); // The role of the current running sketch
 
