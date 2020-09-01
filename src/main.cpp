@@ -12,14 +12,12 @@
 #define SONAR4 5
 #define LEDPIN 7
 #define FOOTSWITCH 8
-#define R1_TRIGGER 9
-#define R2_TRIGGER 10
 #define CE 19
 #define CSN 18
 #define PIR0 20
 #define PIR1 21
 
-// 0 = controller, 1 = peripheral
+// 0 = controller, 1 = peripheral, 2/3 = sensor nodes
 bool radioNumber = 1;
 
 //  Last time in millis since last used the radio
@@ -33,10 +31,10 @@ CRGBArray<NUM_LEDS> leds;
 #define MAX_DISTANCE 200 // Maximum distance (in cm) to ping.
 
 NewPing sonar[SONAR_NUM] = { // Sensor object array.
-    NewPing(R1_TRIGGER, SONAR1, MAX_DISTANCE),
-    NewPing(R1_TRIGGER, SONAR2, MAX_DISTANCE),
-    NewPing(R2_TRIGGER, SONAR3, MAX_DISTANCE),
-    NewPing(R2_TRIGGER, SONAR4, MAX_DISTANCE)};
+    NewPing(10, SONAR1, MAX_DISTANCE),
+    NewPing(10, SONAR2, MAX_DISTANCE),
+    NewPing(10, SONAR3, MAX_DISTANCE),
+    NewPing(10, SONAR4, MAX_DISTANCE)};
 
 //  Distance below which sonar considered triggered
 int sonarTriggerDistance[] = {10, 10, 10, 10};
@@ -70,11 +68,11 @@ typedef enum
   role_peripheral
 } role_e;
 // The various roles supported by this sketch
-const char *role_friendly_name[] = {"invalid", "controller", "peripheral"}; // The debug-friendly names of those roles
+const char *role_friendly_name[] = {"invalid", "controller", "peripheral", "sensor1", "sensor2"}; // The debug-friendly names of those roles
 
 RF24 radio(CE, CSN);
 
-byte addresses[][6] = {"1Node", "2Node"};
+byte addresses[][6] = {"1Node", "2Node", "3Node", "4Node"};
 
 role_e role = role_e(radioNumber); // The role of the current running sketch
 
