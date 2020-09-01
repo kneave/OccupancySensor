@@ -283,43 +283,60 @@ void ReadSensors(bool debug = false)
   }
 }
 
-void UpdateRadio()
+byte *ReadWriteRadio(byte input[], int radioId)
 {
-  if (radioNumber == 0)
+  radio.stopListening(); // First, stop listening so we can talk.
+
+  //  Update the peripheral, get footswitch status
+  radio.openWritingPipe(addresses[radioId]);
+
+  if (!radio.write(&input, sizeof(input)))
   {
-    radio.stopListening(); // First, stop listening so we can talk.
+    radioLastSeen = 0;
+  }
 
-    if (!radio.write(&roomStateData, sizeof(roomStateData)))
+  radio.startListening(); // Now, continue listening
+
+  unsigned long started_waiting_at = micros(); // Set up a timeout period, get the current microseconds
+  boolean timeout = false;                     // Set up a variable to indicate if a response was received or not
+
+  while (!radio.available())
+  { // While nothing is received
+    if (micros() - started_waiting_at > 200000)
+    { // If waited longer than 200ms, indicate timeout and exit while loop
+      timeout = true;
+      break;
+    }
+  }
+
+  if (timeout)
+  { // Describe the results
+    Serial.println(F("Failed, response timed out."));
+  }
+  else
+  {
+    switch (radioId)
     {
-      radioLastSeen = 0;
-    }
-
-    radio.startListening(); // Now, continue listening
-
-    unsigned long started_waiting_at = micros(); // Set up a timeout period, get the current microseconds
-    boolean timeout = false;                     // Set up a variable to indicate if a response was received or not
-
-    while (!radio.available())
-    { // While nothing is received
-      if (micros() - started_waiting_at > 200000)
-      { // If waited longer than 200ms, indicate timeout and exit while loop
-        timeout = true;
-        break;
-      }
-    }
-
-    if (timeout)
-    { // Describe the results
-      Serial.println(F("Failed, response timed out."));
-    }
-    else
-    {
-      // Grab the response, compare, and send to debugging spew
+    case 1:
       radio.read(&peripheralFootSwitch, sizeof(peripheralFootSwitch));
+      // Grab the response, compare, and send to debugging spew
       Serial.print("Remote footswitch: ");
       Serial.println(peripheralFootSwitch);
-      radioLastSeen = millis();
+      break;
+    case 2:
+      
+      break;
     }
+
+    radioLastSeen = millis();
+  }
+}
+
+void UpdateRadio()
+{
+  //  Controller functions
+  if (radioNumber == 0)
+  {
 
     // Try again 1s later
     delay(50);
@@ -334,6 +351,22 @@ void UpdateRadio()
       while (radio.available())
       {                                                    // While there is data ready
         radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
+      }
+      radio.stopListening();                                            // First, stop listening so we can talk
+      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
+      radio.startListening();                                           // Now, resume listening so we catch the next packets.
+      radioLastSeen = millis();
+    }
+  }
+
+  if (radioNumber == 2 | radioNumber == 3)
+  {
+    if (radio.available())
+    {
+      byte incoming;
+      while (radio.available())
+      {                                          // While there is data ready
+        radio.read(&incoming, sizeof(incoming)); // Get the payload
       }
       radio.stopListening();                                            // First, stop listening so we can talk
       radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
@@ -426,15 +459,24 @@ void InitRadio()
   radio.setPALevel(RF24_PA_MIN);
   radio.setDataRate(RF24_1MBPS);
 
-  if (radioNumber)
+  switch (radioNumber)
   {
+  case 0:
     radio.openWritingPipe(addresses[1]);
     radio.openReadingPipe(1, addresses[0]);
-  }
-  else
-  {
+    break;
+  case 1:
     radio.openWritingPipe(addresses[0]);
     radio.openReadingPipe(1, addresses[1]);
+    break;
+  case 2:
+    radio.openWritingPipe(addresses[0]);
+    radio.openReadingPipe(1, addresses[2]);
+    break;
+  case 3:
+    radio.openWritingPipe(addresses[0]);
+    radio.openReadingPipe(1, addresses[3]);
+    break;
   }
 
   radio.startListening(); // Start listening
