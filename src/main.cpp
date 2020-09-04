@@ -2,61 +2,20 @@
 #include <SPI.h>
 #include "nRF24L01.h"
 #include "RF24.h"
-#include <NewPing.h>
+#include "controller.h"
+#include "sensor.h"
 #include <FastLED.h>
-
-//  Pin Definitions
-#define SONAR1 2
-#define SONAR2 3
-#define SONAR3 4
-#define SONAR4 5
-#define LEDPIN 7
-#define FOOTSWITCH 8
-#define CE 19
-#define CSN 18
-#define PIR0 20
-#define PIR1 21
-
-// 0 = controller, 1 = peripheral, 2/3 = sensor nodes
-bool radioNumber = 1;
-
-//  Last time in millis since last used the radio
-long radioLastSeen = 1;
 
 #define NUM_LEDS 10
 CRGBArray<NUM_LEDS> leds;
 
-//  Sensor Setup
-#define SONAR_NUM 4      // Number of sensors.
-#define MAX_DISTANCE 200 // Maximum distance (in cm) to ping.
+//  Pin Definitions
+#define LEDPIN 7
+#define CE 19
+#define CSN 18
 
-NewPing sonar[SONAR_NUM] = { // Sensor object array.
-    NewPing(10, SONAR1, MAX_DISTANCE),
-    NewPing(10, SONAR2, MAX_DISTANCE),
-    NewPing(10, SONAR3, MAX_DISTANCE),
-    NewPing(10, SONAR4, MAX_DISTANCE)};
-
-//  Distance below which sonar considered triggered
-int sonarTriggerDistance[] = {10, 10, 10, 10};
-
-//  Time in milliseconds from last activation
-//  If time is greater than the value, that state is active
-//  red is < amber
-int amberRoomDelay = 7500;
-int greenRoomTrigger = 15000;
-
-int amberAlleyDelay = 10000;
-int redAlleyDelay = 14000;
-
-//  Interval is how quickly to flash while waiting on the alley
-int flashInterval = 500;
-//  Flash last is the time since we last toggled the LED
-int flashLast = 0;
-
-int pir0value = LOW;
-int pir1value = LOW;
-int controllerFootSwitch = LOW;
-int peripheralFootSwitch = LOW;
+// 0 = controller, 1 = peripheral, 2/3 = sensor nodes
+int radioNumber = 0;
 
 //  Radio Setup
 
@@ -65,10 +24,12 @@ int peripheralFootSwitch = LOW;
 typedef enum
 {
   role_controller = 0,
-  role_peripheral
+  role_peripheral,
+  role_sensor0,
+  role_sensor1
 } role_e;
 // The various roles supported by this sketch
-const char *role_friendly_name[] = {"invalid", "controller", "peripheral", "sensor1", "sensor2"}; // The debug-friendly names of those roles
+const char *role_friendly_name[] = {"invalid", "controller", "peripheral", "sensor0", "sensor1"}; // The debug-friendly names of those roles
 
 RF24 radio(CE, CSN);
 
@@ -78,129 +39,8 @@ role_e role = role_e(radioNumber); // The role of the current running sketch
 
 byte counter = 1;
 
-//  Setup variables for sharing room states
-//  0 = LED off, 1 = engaged, 2 = possibly vacant, 3 = vacant, 4 = waiting (alleyway)
-typedef enum
-{
-  off,
-  red,
-  amber,
-  green,
-  waiting
-} state_e;
-
-struct RoomStates
-{
-  state_e room1;
-  state_e room2;
-  state_e alley_front;
-  state_e alley_rear;
-} roomStateData;
-
-//  sonar 0 to 3, pir0, pir1, controller footswitch, peripheral footswitch
-state_e sensorStates[] = {
-    state_e(1),
-    state_e(1),
-    state_e(1),
-    state_e(1),
-    state_e(1),
-    state_e(1),
-    state_e(1),
-    state_e(1)};
-
-typedef enum
-{
-  room1_1,
-  room1_2,
-  room2_1,
-  room2_2,
-  pir0,
-  pir1,
-  contFootswitch,
-  periFootswitch
-} sensor_e;
-
-//  sensor_e references the locations below
-long lastTriggered[] = {0, 0, 0, 0, 0, 0, 0, 0};
-
-void PrintRoomStates()
-{
-  Serial.print(millis());
-  Serial.print("-");
-  Serial.print(radioNumber);
-  Serial.print("- Room States: ");
-  Serial.print(roomStateData.room1);
-  Serial.print(",");
-  Serial.print(roomStateData.room2);
-  Serial.print(",");
-  Serial.print(roomStateData.alley_front);
-  Serial.print(",");
-  Serial.println(roomStateData.alley_rear);
-}
-
-void CheckRoomStates()
-{
-  if ((sensorStates[sensor_e(room1_1)] == state_e(red)) | (sensorStates[sensor_e(room1_2)] == state_e(red)) | (sensorStates[sensor_e(pir0)] == state_e(red)))
-  {
-    roomStateData.room1 = state_e(red);
-  }
-  else if ((sensorStates[sensor_e(room1_1)] == state_e(amber)) | (sensorStates[sensor_e(room1_2)] == state_e(amber)) | (sensorStates[sensor_e(pir0)] == state_e(amber)))
-  {
-    roomStateData.room1 = state_e(amber);
-  }
-  else
-  {
-    roomStateData.room1 = state_e(green);
-  }
-
-  if ((sensorStates[sensor_e(room2_1)] == state_e(red)) | (sensorStates[sensor_e(room2_2)] == state_e(red)) | (sensorStates[sensor_e(pir1)] == state_e(red)))
-  {
-    roomStateData.room2 = state_e(red);
-  }
-  else if ((sensorStates[sensor_e(room2_1)] == state_e(amber)) | (sensorStates[sensor_e(room2_2)] == state_e(amber)) | (sensorStates[sensor_e(pir0)] == state_e(amber)))
-  {
-    roomStateData.room2 = state_e(amber);
-  }
-  else
-  {
-    roomStateData.room2 = state_e(green);
-  }
-}
-
-state_e CheckAlley(state_e here, state_e there, sensor_e sensor)
-{
-  //  If waiting and the other side is green, flash red
-  switch (here)
-  {
-  case state_e(off):
-  case state_e(waiting):
-    if (there == state_e(red))
-    {
-      here = state_e(green);
-      lastTriggered[sensor] = millis();
-    }
-    else if (millis() - flashLast > flashInterval)
-    {
-      flashLast = millis();
-      here = here == state_e(waiting) ? state_e(off) : state_e(waiting);
-    }
-    break;
-  case state_e(green):
-    if (millis() - lastTriggered[sensor] > amberAlleyDelay)
-    {
-      here = state_e(amber);
-    }
-    break;
-  case state_e(amber):
-    if (millis() - lastTriggered[sensor] > redAlleyDelay)
-    {
-      here = state_e(red);
-    }
-    break;
-  }
-
-  return here;
-}
+//  peripheral, sensor0, sensor1
+unsigned long radiosLastSeen[] = {0, 0, 0, 0};
 
 //  Check the sensor states, generate room states
 void CheckSensorStates(bool debug = false)
@@ -230,69 +70,22 @@ void CheckSensorStates(bool debug = false)
     }
   }
 
-  roomStateData.alley_front = CheckAlley(roomStateData.alley_front, roomStateData.alley_rear, contFootswitch);
-  roomStateData.alley_rear = CheckAlley(roomStateData.alley_rear, roomStateData.alley_front, periFootswitch);
-
   if (debug == true)
   {
     Serial.println(debugmsg);
   }
 }
 
-void ReadSensors(bool debug = false)
-{
-  if (debug == true)
-  {
-    for (uint8_t i = 0; i < SONAR_NUM; i++)
-    {            // Loop through each sensor and display results.
-      delay(50); // Wait 50ms between pings (about 20 pings/sec). 29ms should be the shortest delay between pings.
-      Serial.print(i);
-      Serial.print("=");
-      Serial.print(sonar[i].ping_cm());
-      Serial.print("cm ");
-    }
-    Serial.print("PIR0 ");
-    Serial.print(digitalRead(PIR0) == HIGH);
-
-    Serial.print(" PIR1 ");
-    Serial.print(digitalRead(PIR1) == HIGH);
-
-    Serial.println();
-  }
-  else
-  {
-    for (uint8_t i = 0; i < SONAR_NUM; i++)
-    {
-      delay(40);
-      int distance = sonar[i].ping_cm();
-      if (distance > 0 && distance < sonarTriggerDistance[i])
-      {
-        lastTriggered[i] = millis();
-      }
-    }
-
-    if (digitalRead(PIR0) == HIGH)
-    {
-      lastTriggered[sensor_e(pir0)] = millis();
-    }
-
-    if (digitalRead(PIR1) == HIGH)
-    {
-      lastTriggered[sensor_e(pir1)] = millis();
-    }
-  }
-}
-
-byte *ReadWriteRadio(byte input[], int radioId)
+void UpdatePeripheral()
 {
   radio.stopListening(); // First, stop listening so we can talk.
 
-  //  Update the peripheral, get footswitch status
-  radio.openWritingPipe(addresses[radioId]);
+  //  Update the peripheral, send room status and get footswitch status
+  radio.openWritingPipe(addresses[1]);
 
-  if (!radio.write(&input, sizeof(input)))
+  if (!radio.write(&roomStateData, sizeof(roomStateData)))
   {
-    radioLastSeen = 0;
+    radiosLastSeen[1] = 0;
   }
 
   radio.startListening(); // Now, continue listening
@@ -315,65 +108,68 @@ byte *ReadWriteRadio(byte input[], int radioId)
   }
   else
   {
-    switch (radioId)
-    {
-    case 1:
-      radio.read(&peripheralFootSwitch, sizeof(peripheralFootSwitch));
-      // Grab the response, compare, and send to debugging spew
-      Serial.print("Remote footswitch: ");
-      Serial.println(peripheralFootSwitch);
-      break;
-    case 2:
-      
-      break;
-    }
+    radio.read(&peripheralFootSwitch, sizeof(peripheralFootSwitch));
+    // Grab the response, compare, and send to debugging spew
+    Serial.print("Remote footswitch: ");
+    Serial.println(peripheralFootSwitch);
 
-    radioLastSeen = millis();
+    radiosLastSeen[1] = millis();
   }
 }
 
-void UpdateRadio()
+void UpdateRoomData(int roomId)
 {
-  //  Controller functions
-  if (radioNumber == 0)
-  {
+  radio.stopListening(); // First, stop listening so we can talk.
+  int radioId = 2 + roomId;
 
-    // Try again 1s later
-    delay(50);
+  //  send a byte to initiate a response
+  radio.openWritingPipe(addresses[radioId]);
+
+  if (!radio.write(&roomStateData, sizeof(roomStateData)))
+  {
+    radiosLastSeen[radioId] = 0;
   }
 
-  //  I could use an "else", this makes it easier to read the code
-  if (radioNumber == 1)
-  {
-    if (radio.available())
-    {
-      // Variable for the received timestamp
-      while (radio.available())
-      {                                                    // While there is data ready
-        radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
-      }
-      radio.stopListening();                                            // First, stop listening so we can talk
-      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
-      radio.startListening();                                           // Now, resume listening so we catch the next packets.
-      radioLastSeen = millis();
+  radio.startListening(); // Now, continue listening
+
+  unsigned long started_waiting_at = micros(); // Set up a timeout period, get the current microseconds
+  boolean timeout = false;                     // Set up a variable to indicate if a response was received or not
+
+  while (!radio.available())
+  { // While nothing is received
+    if (micros() - started_waiting_at > 200000)
+    { // If waited longer than 200ms, indicate timeout and exit while loop
+      timeout = true;
+      break;
     }
   }
 
-  if (radioNumber == 2 | radioNumber == 3)
-  {
-    if (radio.available())
-    {
-      byte incoming;
-      while (radio.available())
-      {                                          // While there is data ready
-        radio.read(&incoming, sizeof(incoming)); // Get the payload
-      }
-      radio.stopListening();                                            // First, stop listening so we can talk
-      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
-      radio.startListening();                                           // Now, resume listening so we catch the next packets.
-      radioLastSeen = millis();
-    }
+  if (timeout)
+  { // Describe the results
+    Serial.println(F("Failed, response timed out."));
   }
+  else
+  {
+    radio.read(&peripheralFootSwitch, sizeof(peripheralFootSwitch));
+    // Grab the response, compare, and send to debugging spew
+    Serial.print("Remote footswitch: ");
+    Serial.println(peripheralFootSwitch);
+
+    radiosLastSeen[radioId] = millis();
+  }
+}
+
+void PrintRoomStates()
+{
+  Serial.print(millis());
+  Serial.print(" - Room States: ");
+  Serial.print(roomStateData.room1);
+  Serial.print(",");
+  Serial.print(roomStateData.room2);
+  Serial.print(",");
+  Serial.print(roomStateData.alley_front);
+  Serial.print(",");
+  Serial.println(roomStateData.alley_rear);
 }
 
 void InitLights()
@@ -416,10 +212,9 @@ void SetRoomLEDs(state_e state, int start)
   }
 }
 
-void UpdateLEDS()
+void UpdateLEDS(int radioNumber, unsigned long radioLastSeenDiff)
 {
   //  Radio status LED
-  long radioLastSeenDiff = millis() - radioLastSeen;
   if (radioLastSeenDiff < 5000)
   {
     leds[0] = CRGB::Green;
@@ -450,6 +245,53 @@ void UpdateLEDS()
   SetRoomLEDs(roomStateData.room2, 7);
 
   FastLED.show();
+}
+
+void UpdateRadio()
+{
+  //  Controller functions
+  if (radioNumber == 0)
+  {
+    UpdatePeripheral();
+    //  UpdateRoomOne();
+    //  UpdateRoomTwo();
+
+    // Try again 1s later
+    delay(50);
+  }
+
+  //  I could use an "else" but this makes it easier to read the code
+  if (radioNumber == 1)
+  {
+    if (radio.available())
+    {
+      // Variable for the received timestamp
+      while (radio.available())
+      {                                                    // While there is data ready
+        radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
+      }
+      radio.stopListening();                                            // First, stop listening so we can talk
+      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
+      radio.startListening();                                           // Now, resume listening so we catch the next packets.
+      radioLastSeen = millis();
+    }
+  }
+
+  if (radioNumber == 2 | radioNumber == 3)
+  {
+    if (radio.available())
+    {
+      byte incoming;
+      while (radio.available())
+      {                                          // While there is data ready
+        radio.read(&incoming, sizeof(incoming)); // Get the payload
+      }
+      radio.stopListening();                      // First, stop listening so we can talk
+      radio.write(&roomState, sizeof(roomState)); // Send the sensor states back.
+      radio.startListening();                     // Now, resume listening so we catch the next packets.
+      radioLastSeen = millis();
+    }
+  }
 }
 
 void InitRadio()
@@ -487,28 +329,25 @@ void setup()
 {
   Serial.begin(115200);
 
+  if (radioNumber <= 1)
+  {
+    InitController();
+
+    //  Init the footswitch
+    Serial.println("Set footswitch pullup...");
+    pinMode(FOOTSWITCH, INPUT_PULLUP);
+  }
+  else
+  {
+    InitSensors();
+  }
+
   //  LED init
   Serial.println("Init lights...");
   InitLights();
 
-  //  Init the footswitch
-  Serial.println("Set footswitch pullup...");
-  pinMode(FOOTSWITCH, INPUT_PULLUP);
-
-  //  Sensor init
-
-  Serial.println("Set PIR inputs...");
-  pinMode(PIR0, INPUT);
-  pinMode(PIR1, INPUT);
-
   Serial.println("Init Radio...");
   InitRadio();
-
-  //  Assume all rooms busy until proven otherwise
-  roomStateData.alley_front = state_e(red);
-  roomStateData.alley_rear = state_e(red);
-  roomStateData.room1 = state_e(red);
-  roomStateData.room2 = state_e(red);
 
   Serial.println("Setup complete.");
 }
@@ -519,13 +358,11 @@ void loop()
   {
     ReadSensors();
     CheckSensorStates(true);
-    CheckRoomStates();
+    //  CheckRoomStates();
     PrintRoomStates();
     controllerFootSwitch = digitalRead(FOOTSWITCH) == LOW;
 
-    //  Implement footswitch logic here
     //  If button pressed on either side, state_e(4)
-
     if (roomStateData.alley_front == state_e(red))
     {
       if (controllerFootSwitch == HIGH)
@@ -547,6 +384,8 @@ void loop()
     peripheralFootSwitch = digitalRead(FOOTSWITCH) == LOW;
   }
 
-  UpdateLEDS();
+  unsigned long radioLastSeenDiff = millis() - radiosLastSeen[radioNumber];
+
+  UpdateLEDS(radioNumber, radioLastSeenDiff);
   UpdateRadio();
 }
