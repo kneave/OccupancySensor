@@ -28,8 +28,6 @@ typedef enum
   role_sensor0,
   role_sensor1
 } role_e;
-// The various roles supported by this sketch
-const char *role_friendly_name[] = {"invalid", "controller", "peripheral", "sensor0", "sensor1"}; // The debug-friendly names of those roles
 
 RF24 radio(CE, CSN);
 
@@ -40,7 +38,7 @@ role_e role = role_e(radioNumber); // The role of the current running sketch
 byte counter = 1;
 
 //  peripheral, sensor0, sensor1
-unsigned long radiosLastSeen[] = {0, 0, 0, 0};
+unsigned long radioLastSeen = 0;
 
 //  Check the sensor states, generate room states
 void CheckSensorStates(bool debug = false)
@@ -76,7 +74,7 @@ void CheckSensorStates(bool debug = false)
   }
 }
 
-void UpdatePeripheral()
+void UpdatePeripheralState()
 {
   radio.stopListening(); // First, stop listening so we can talk.
 
@@ -85,7 +83,7 @@ void UpdatePeripheral()
 
   if (!radio.write(&roomStateData, sizeof(roomStateData)))
   {
-    radiosLastSeen[1] = 0;
+    radioLastSeen = 0;
   }
 
   radio.startListening(); // Now, continue listening
@@ -113,11 +111,11 @@ void UpdatePeripheral()
     Serial.print("Remote footswitch: ");
     Serial.println(peripheralFootSwitch);
 
-    radiosLastSeen[1] = millis();
+    radioLastSeen = millis();
   }
 }
 
-void UpdateRoomData(int roomId)
+void GetRoomData(int roomId)
 {
   radio.stopListening(); // First, stop listening so we can talk.
   int radioId = 2 + roomId;
@@ -127,7 +125,7 @@ void UpdateRoomData(int roomId)
 
   if (!radio.write(&roomStateData, sizeof(roomStateData)))
   {
-    radiosLastSeen[radioId] = 0;
+    radioLastSeen = 0;
   }
 
   radio.startListening(); // Now, continue listening
@@ -155,7 +153,7 @@ void UpdateRoomData(int roomId)
     Serial.print("Remote footswitch: ");
     Serial.println(peripheralFootSwitch);
 
-    radiosLastSeen[radioId] = millis();
+    radioLastSeen = millis();
   }
 }
 
@@ -214,7 +212,7 @@ void SetRoomLEDs(state_e state, int start)
 
 void UpdateLEDS(int radioNumber, unsigned long radioLastSeenDiff)
 {
-  //  Radio status LED
+  //  Radio status LED, common to all nodes
   if (radioLastSeenDiff < 5000)
   {
     leds[0] = CRGB::Green;
@@ -226,6 +224,13 @@ void UpdateLEDS(int radioNumber, unsigned long radioLastSeenDiff)
   else
   {
     leds[0] = CRGB::Red;
+  }
+
+  //  If we're a sensor node, skip the rest
+  if (radioNumber > 1)
+  {
+    FastLED.show();
+    return;
   }
 
   //  Alley
@@ -247,50 +252,35 @@ void UpdateLEDS(int radioNumber, unsigned long radioLastSeenDiff)
   FastLED.show();
 }
 
-void UpdateRadio()
+void UpdatePeripheralRadio()
 {
-  //  Controller functions
-  if (radioNumber == 0)
+  if (radio.available())
   {
-    UpdatePeripheral();
-    //  UpdateRoomOne();
-    //  UpdateRoomTwo();
-
-    // Try again 1s later
-    delay(50);
-  }
-
-  //  I could use an "else" but this makes it easier to read the code
-  if (radioNumber == 1)
-  {
-    if (radio.available())
-    {
-      // Variable for the received timestamp
-      while (radio.available())
-      {                                                    // While there is data ready
-        radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
-      }
-      radio.stopListening();                                            // First, stop listening so we can talk
-      radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
-      radio.startListening();                                           // Now, resume listening so we catch the next packets.
-      radioLastSeen = millis();
+    // Variable for the received timestamp
+    while (radio.available())
+    {                                                    // While there is data ready
+      radio.read(&roomStateData, sizeof(roomStateData)); // Get the payload
     }
+    radio.stopListening();                                            // First, stop listening so we can talk
+    radio.write(&peripheralFootSwitch, sizeof(peripheralFootSwitch)); // Send the final one back.
+    radio.startListening();                                           // Now, resume listening so we catch the next packets.
+    radioLastSeen = millis();
   }
+}
 
-  if (radioNumber == 2 | radioNumber == 3)
+void UpdateSensorRadio()
+{
+  if (radio.available())
   {
-    if (radio.available())
-    {
-      byte incoming;
-      while (radio.available())
-      {                                          // While there is data ready
-        radio.read(&incoming, sizeof(incoming)); // Get the payload
-      }
-      radio.stopListening();                      // First, stop listening so we can talk
-      radio.write(&roomState, sizeof(roomState)); // Send the sensor states back.
-      radio.startListening();                     // Now, resume listening so we catch the next packets.
-      radioLastSeen = millis();
+    byte incoming;
+    while (radio.available())
+    {                                          // While there is data ready
+      radio.read(&incoming, sizeof(incoming)); // Get the payload
     }
+    radio.stopListening();                      // First, stop listening so we can talk
+    radio.write(&roomState, sizeof(roomState)); // Send the sensor states back.
+    radio.startListening();                     // Now, resume listening so we catch the next packets.
+    radioLastSeen = millis();
   }
 }
 
@@ -301,21 +291,21 @@ void InitRadio()
   radio.setPALevel(RF24_PA_MIN);
   radio.setDataRate(RF24_1MBPS);
 
-  switch (radioNumber)
+  switch (role)
   {
-  case 0:
+  case role_controller:
     radio.openWritingPipe(addresses[1]);
     radio.openReadingPipe(1, addresses[0]);
     break;
-  case 1:
+  case role_peripheral:
     radio.openWritingPipe(addresses[0]);
     radio.openReadingPipe(1, addresses[1]);
     break;
-  case 2:
+  case role_sensor0:
     radio.openWritingPipe(addresses[0]);
     radio.openReadingPipe(1, addresses[2]);
     break;
-  case 3:
+  case role_sensor1:
     radio.openWritingPipe(addresses[0]);
     radio.openReadingPipe(1, addresses[3]);
     break;
@@ -329,9 +319,9 @@ void setup()
 {
   Serial.begin(115200);
 
-  if (radioNumber <= 1)
+  if (role == role_controller | role == role_peripheral)
   {
-    InitController();
+    InitRoomStates();
 
     //  Init the footswitch
     Serial.println("Set footswitch pullup...");
@@ -339,6 +329,7 @@ void setup()
   }
   else
   {
+    Serial.println("Init sensors...");
     InitSensors();
   }
 
@@ -352,12 +343,17 @@ void setup()
   Serial.println("Setup complete.");
 }
 
+//  The functions are split based on radio number, this denotes node type
 void loop()
 {
-  if (radioNumber == 0)
+  //  Phat Controller
+  if (role == role_controller)
   {
-    ReadSensors();
-    CheckSensorStates(true);
+    // Update to/from the other nodes
+    UpdatePeripheralState();
+    GetRoomData(0);
+    GetRoomData(1);
+
     //  CheckRoomStates();
     PrintRoomStates();
     controllerFootSwitch = digitalRead(FOOTSWITCH) == LOW;
@@ -379,13 +375,23 @@ void loop()
       }
     }
   }
-  else
+
+  //  You're a peripheral Harry!
+  if (role == role_peripheral)
   {
     peripheralFootSwitch = digitalRead(FOOTSWITCH) == LOW;
+    UpdatePeripheralRadio();
   }
 
-  unsigned long radioLastSeenDiff = millis() - radiosLastSeen[radioNumber];
+  // I sense a disturbance...
+  if (role == role_sensor0 | role == role_sensor1)
+  {
+    ReadSensors();
+    CheckSensorStates();
+    UpdateSensorRadio();
+  }
 
+  //  Code common to all nodes
+  unsigned long radioLastSeenDiff = millis() - radioLastSeen;
   UpdateLEDS(radioNumber, radioLastSeenDiff);
-  UpdateRadio();
 }

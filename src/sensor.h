@@ -31,8 +31,6 @@ typedef enum
 //  sensor_e references the locations below
 unsigned long lastTriggered[] = {0, 0, 0};
 
-unsigned long radioLastSeen;
-
 NewPing sonar[SONAR_NUM] = { // Sensor object array.
     NewPing(10, SONAR0, MAX_DISTANCE),
     NewPing(10, SONAR1, MAX_DISTANCE)};
@@ -114,6 +112,5 @@ void InitSensors()
 //  This will only be called when data requested
 int ReturnState()
 {
-    radioLastSeen = millis();
     return roomState;
 }

@@ -68,7 +68,7 @@ state_e CheckAlley(state_e here, state_e there, int footswitch)
     return here;
 }
 
-void InitController()
+void InitRoomStates()
 {
     //  Assume all rooms busy until proven otherwise
     roomStateData.alley_front = state_e(red);
